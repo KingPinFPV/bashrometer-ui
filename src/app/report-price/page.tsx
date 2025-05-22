@@ -3,14 +3,13 @@
 
 import { useState, useEffect, FormEvent } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link'; // <--- תיקון 1: ייבוא Link
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
-// ממשקים לנתונים שנשלוף מה-API
 interface Product {
   id: number;
   name: string;
-  brand?: string | null; // <--- תיקון 2: הוספת brand כשדה אופציונלי (ה-API שלנו כן מחזיר אותו ב-GET /products)
+  brand?: string | null;
 }
 
 interface Retailer {
@@ -21,6 +20,7 @@ interface Retailer {
 export default function ReportPricePage() {
   const { user, token, isLoading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [retailers, setRetailers] = useState<Retailer[]>([]);
@@ -36,49 +36,74 @@ export default function ReportPricePage() {
   
   const [message, setMessage] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [initialDataLoading, setInitialDataLoading] = useState<boolean>(true);
+
+
+  useEffect(() => {
+    const productIdFromQuery = searchParams.get('productId');
+    if (productIdFromQuery) {
+      setSelectedProductId(productIdFromQuery);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!authLoading && !user) {
-      router.push('/login?redirect=/report-price'); 
+      router.push(`/login?redirect=/report-price${selectedProductId ? `?productId=${selectedProductId}&productName=${encodeURIComponent(searchParams.get('productName') || '')}` : ''}`);
     }
-  }, [user, authLoading, router]);
+  }, [user, authLoading, router, selectedProductId, searchParams]);
 
   useEffect(() => {
     if (user) { 
       const fetchData = async () => {
+        setInitialDataLoading(true);
+        setMessage('');
         try {
-          const productsResponse = await fetch('https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products?limit=1000');
-          const retailersResponse = await fetch('https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/retailers?limit=1000');
+          const productsPromise = fetch('https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products?limit=1000')
+            .then(res => {
+              if (!res.ok) throw new Error(`Failed to fetch products: ${res.statusText}`);
+              return res.json();
+            });
+          const retailersPromise = fetch('https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/retailers?limit=1000')
+            .then(res => {
+              if (!res.ok) throw new Error(`Failed to fetch retailers: ${res.statusText}`);
+              return res.json();
+            });
 
-          if (!productsResponse.ok || !retailersResponse.ok) {
-            throw new Error('Failed to fetch initial data for the form');
-          }
+          const [productsData, retailersData] = await Promise.all([productsPromise, retailersPromise]);
 
-          const productsData = await productsResponse.json();
-          const retailersData = await retailersResponse.json();
-
-          setProducts(productsData.data); // ה-API שלנו ל-GET /products מחזיר גם brand
-          setRetailers(retailersData.data);
+          setProducts(productsData.data || []);
+          setRetailers(retailersData.data || []);
         } catch (error: any) {
           console.error("Failed to fetch products/retailers:", error);
           setMessage(`שגיאה בטעינת נתונים לטופס: ${error.message}`);
+        } finally {
+          setInitialDataLoading(false);
         }
       };
       fetchData();
+    } else {
+        setInitialDataLoading(false); // If no user, no need to load products/retailers for the form
     }
-  }, [user]);
+  }, [user]); // Rerun if user changes
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    // ... לוגיקת handleSubmit נשארת כפי שהייתה ...
     event.preventDefault();
     if (!token) {
       setMessage("אינך מחובר. אנא התחבר כדי לדווח על מחיר.");
+      setIsSubmitting(false); // Ensure button is re-enabled
       return;
     }
     if (!selectedProductId || !selectedRetailerId || !regularPrice) {
       setMessage("אנא מלא את כל שדות החובה (מוצר, קמעונאי, מחיר רגיל).");
+      setIsSubmitting(false);
       return;
     }
+    if (isOnSale && !salePrice) {
+        setMessage("כאשר 'מוצר במבצע' מסומן, חובה להזין מחיר מבצע.");
+        setIsSubmitting(false);
+        return;
+    }
+
 
     setIsSubmitting(true);
     setMessage('');
@@ -87,13 +112,14 @@ export default function ReportPricePage() {
       product_id: parseInt(selectedProductId),
       retailer_id: parseInt(selectedRetailerId),
       regular_price: parseFloat(regularPrice),
-      sale_price: salePrice ? parseFloat(salePrice) : null,
+      sale_price: salePrice && isOnSale ? parseFloat(salePrice) : null, // Send sale_price only if on sale
       is_on_sale: isOnSale,
       unit_for_price: unitForPrice,
       quantity_for_price: parseFloat(quantityForPrice),
-      source: 'user_report',
-      report_type: 'community',
+      source: 'user_report', 
+      report_type: 'community', 
       notes: notes || null,
+      // status will default to 'approved' on the backend if not sent
     };
 
     const apiUrl = 'https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices';
@@ -110,16 +136,29 @@ export default function ReportPricePage() {
 
       const responseData = await response.json();
 
-      if (response.ok) {
-        setMessage('הדיווח נשלח בהצלחה! תודה רבה.');
-        setSelectedProductId('');
-        setSelectedRetailerId('');
+      if (response.ok) { // 200 or 201
+        const successMsg = response.status === 201 ? 'הדיווח נוצר ונשלח בהצלחה! תודה רבה.' : 'הדיווח עודכן בהצלחה! תודה רבה.';
+        setMessage(successMsg);
+        
+        // Optional: Reset form after successful submission
+        // setSelectedProductId(''); // Keep product if they want to report another price for it
+        // setSelectedRetailerId(''); // Or clear this one
         setRegularPrice('');
         setSalePrice('');
         setIsOnSale(false);
-        setUnitForPrice('kg');
-        setQuantityForPrice('1');
-        setNotes('');
+        // setUnitForPrice('kg');
+        // setQuantityForPrice('1');
+        // setNotes('');
+
+        // Navigate back to the product page after a short delay
+        setTimeout(() => {
+            if(selectedProductId) {
+                router.push(`/products/${selectedProductId}`);
+            } else {
+                router.push('/products'); // Fallback
+            }
+        }, 2000);
+
       } else {
         setMessage(responseData.error || 'אירעה שגיאה בשליחת הדיווח.');
       }
@@ -131,25 +170,24 @@ export default function ReportPricePage() {
     }
   };
 
-  if (authLoading) {
-    return <div className="text-center py-10">טוען נתוני אימות...</div>;
+  if (authLoading || initialDataLoading) {
+    return <div className="text-center py-10">טוען נתונים...</div>;
   }
   
-  if (!user && !authLoading) { // הצג רק אם הטעינה הסתיימה והמשתמש לא מחובר
+  if (!user && !authLoading) { 
     return (
       <div className="text-center py-10">
         <p className="text-xl text-slate-700 mb-4">עליך להתחבר כדי לדווח על מחיר.</p>
-        <Link href="/login?redirect=/report-price" className="text-sky-600 hover:text-sky-700 font-semibold">
+        <Link href={`/login?redirect=/report-price${selectedProductId ? `?productId=${selectedProductId}&productName=${encodeURIComponent(searchParams.get('productName') || '')}` : ''}`} className="text-sky-600 hover:text-sky-700 font-semibold">
           עבור לדף ההתחברות
         </Link>
       </div>
     );
   }
 
-  // אם המשתמש מחובר, הצג את הטופס
   return (
-    <div className="max-w-lg mx-auto mt-10 p-6 bg-white rounded-lg shadow-xl">
-      <h1 className="text-3xl font-bold text-center text-slate-700 mb-8">דיווח על מחיר חדש</h1>
+    <div className="max-w-lg mx-auto mt-10 p-6 sm:p-8 bg-white rounded-lg shadow-xl">
+      <h1 className="text-2xl sm:text-3xl font-bold text-center text-slate-700 mb-8">דיווח על מחיר חדש</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label htmlFor="product" className="block text-sm font-medium text-slate-700">
@@ -157,26 +195,28 @@ export default function ReportPricePage() {
           </label>
           <select
             id="product"
+            name="product_id" // Good practice for forms
             value={selectedProductId}
             onChange={(e) => setSelectedProductId(e.target.value)}
             required
             className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-slate-300 focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm rounded-md"
           >
-            <option value="" disabled>-- בחר מוצר --</option>
+            <option value="" disabled>
+              {searchParams.get('productName') && selectedProductId ? decodeURIComponent(searchParams.get('productName')!) : '-- בחר מוצר --'}
+            </option>
             {products.map((p) => (
-              // תיקון 2: כעת p.brand זמין
               <option key={p.id} value={p.id}>{p.name} {p.brand ? `(${p.brand})` : ''}</option>
             ))}
           </select>
         </div>
 
-        {/* ... שאר הטופס נשאר כפי שהיה ... */}
         <div>
           <label htmlFor="retailer" className="block text-sm font-medium text-slate-700">
             בחר קמעונאי <span className="text-red-500">*</span>
           </label>
           <select
             id="retailer"
+            name="retailer_id"
             value={selectedRetailerId}
             onChange={(e) => setSelectedRetailerId(e.target.value)}
             required
@@ -196,11 +236,12 @@ export default function ReportPricePage() {
           <input
             type="number"
             id="regularPrice"
+            name="regular_price"
             value={regularPrice}
             onChange={(e) => setRegularPrice(e.target.value)}
             required
             step="0.01"
-            min="0"
+            min="0.01" // Price should be positive
             className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
           />
         </div>
@@ -208,9 +249,15 @@ export default function ReportPricePage() {
         <div className="flex items-center">
           <input
             id="isOnSale"
+            name="is_on_sale"
             type="checkbox"
             checked={isOnSale}
-            onChange={(e) => setIsOnSale(e.target.checked)}
+            onChange={(e) => {
+                setIsOnSale(e.target.checked);
+                if (!e.target.checked) { // If unchecked, clear sale price
+                    setSalePrice('');
+                }
+            }}
             className="h-4 w-4 text-sky-600 border-slate-300 rounded focus:ring-sky-500"
           />
           <label htmlFor="isOnSale" className="ml-2 block text-sm text-slate-900 rtl:mr-2 rtl:ml-0">
@@ -226,23 +273,25 @@ export default function ReportPricePage() {
             <input
               type="number"
               id="salePrice"
+              name="sale_price"
               value={salePrice}
               onChange={(e) => setSalePrice(e.target.value)}
               required={isOnSale}
               step="0.01"
-              min="0"
+              min="0.01" // Price should be positive
               className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
             />
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="unitForPrice" className="block text-sm font-medium text-slate-700">
               יחידת מידה למחיר <span className="text-red-500">*</span>
             </label>
             <select
               id="unitForPrice"
+              name="unit_for_price"
               value={unitForPrice}
               onChange={(e) => setUnitForPrice(e.target.value)}
               required
@@ -262,11 +311,12 @@ export default function ReportPricePage() {
             <input
               type="number"
               id="quantityForPrice"
+              name="quantity_for_price"
               value={quantityForPrice}
               onChange={(e) => setQuantityForPrice(e.target.value)}
               required
-              step="0.01"
-              min="0.01"
+              step="0.01" // Allow for fractions like 0.5 kg
+              min="0.01" 
               className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
             />
           </div>
@@ -278,6 +328,7 @@ export default function ReportPricePage() {
           </label>
           <textarea
             id="notes"
+            name="notes"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
@@ -293,7 +344,7 @@ export default function ReportPricePage() {
 
         <button
           type="submit"
-          disabled={isSubmitting || authLoading || !user}
+          disabled={isSubmitting || authLoading || !user || initialDataLoading}
           className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:opacity-50"
         >
           {isSubmitting ? 'שולח דיווח...' : 'שלח דיווח'}

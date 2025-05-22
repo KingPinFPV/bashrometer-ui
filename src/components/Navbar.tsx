@@ -16,14 +16,13 @@ const Navbar = () => {
         <div className="space-x-4 rtl:space-x-reverse">
           <Link href="/" className="hover:text-slate-300">בית</Link>
           <Link href="/products" className="hover:text-slate-300">מוצרים</Link>
-
+          
           {isLoading ? null : user ? (
             <>
-              {/* קישור לדף דיווח מחיר - יופיע רק למשתמשים מחוברים */}
               <Link href="/report-price" className="bg-green-500 hover:bg-green-600 px-3 py-1 rounded-md text-sm font-semibold">
                 דווח על מחיר
               </Link>
-              <span className="text-slate-300 hidden sm:inline">שלום, {user.name || user.email}!</span> {/* הסתר שם משתמש במסכים קטנים אם רוצים */}
+              <span className="text-slate-300 hidden sm:inline">שלום, {user.name || user.email}!</span>
               <button
                 onClick={logout}
                 className="bg-sky-600 hover:bg-sky-700 px-3 py-1 rounded-md text-sm"
