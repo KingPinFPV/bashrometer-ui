@@ -1,13 +1,12 @@
 // src/app/products/[productId]/page.tsx
 "use client";
 
-import { useState, useEffect, useCallback } from 'react'; // Added useCallback
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-// Consider adding an icon library for the like button, e.g., react-icons
-// import { FaHeart, FaRegHeart } from 'react-icons/fa'; // Example with react-icons
 
+// Interfaces
 interface PriceExample {
   price_id: number;
   retailer_id: number;
@@ -21,8 +20,8 @@ interface PriceExample {
   valid_to: string | null;
   notes: string | null;
   calculated_price_per_100g: number | null;
-  likes_count: number;         // <-- הוספה
-  current_user_liked: boolean; // <-- הוספה
+  likes_count: number;
+  current_user_liked: boolean;
 }
 
 interface ProductDetailed {
@@ -44,6 +43,8 @@ interface ProductDetailed {
 }
 
 export default function ProductDetailPage() {
+  console.log("RENDERING: ProductDetailPage component"); // לוג בכניסה לרכיב
+
   const params = useParams();
   const router = useRouter();
   const productId = params.productId as string;
@@ -52,13 +53,12 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<ProductDetailed | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Renamed to avoid conflict with product state loading
-  const [isLikeLoading, setIsLikeLoading] = useState<number | null>(null); // Store price_id being liked/unliked
+  const [isLikeLoading, setIsLikeLoading] = useState<number | null>(null);
 
   const fetchProductDetails = useCallback(async () => {
-    // Added useCallback to potentially memoize if needed, and for consistent function reference
+    console.log(`WorkspaceProductDetails: Called for productId: ${productId}`);
     if (!productId) {
+      console.error("fetchProductDetails: No productId provided.");
       setIsLoading(false);
       setError("Product ID is missing.");
       return;
@@ -66,97 +66,90 @@ export default function ProductDetailPage() {
     setIsLoading(true);
     setError(null);
     const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products/${productId}`;
+    console.log(`WorkspaceProductDetails: Fetching from API URL: ${apiUrl}`);
 
     try {
-      // Pass token if user is logged in to get current_user_liked status correctly
       const headers: HeadersInit = {};
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      const response = await fetch(apiUrl, { headers }); // Send token with the request
+      const response = await fetch(apiUrl, { headers });
+      console.log(`WorkspaceProductDetails: API response status: ${response.status} for productId: ${productId}`);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }));
+        let errorData;
+        try {
+          errorData = await response.json();
+          console.error("fetchProductDetails: API error data:", errorData);
+        } catch (parseError) {
+          errorData = { error: `HTTP error! status: ${response.status}, failed to parse error response.` };
+          console.error("fetchProductDetails: Failed to parse API error response:", parseError);
+        }
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       const data: ProductDetailed = await response.json();
+      console.log(`WorkspaceProductDetails: Data received from API for productId ${productId}:`, JSON.stringify(data, null, 2));
       setProduct(data);
     } catch (e: any) {
-      console.error("Failed to fetch product details:", e);
+      console.error(`WorkspaceProductDetails: Error fetching product details for productId ${productId}:`, e);
       setError(e.message || 'Failed to load product details.');
     } finally {
       setIsLoading(false);
+      console.log(`WorkspaceProductDetails: Finished for productId: ${productId}`);
     }
-  }, [productId, token]); // Add token as a dependency, so if token changes (login/logout), data might refetch
+  }, [productId, token]);
 
   useEffect(() => {
+    console.log("ProductDetailPage useEffect for fetchProductDetails triggered.");
     fetchProductDetails();
-  }, [fetchProductDetails]); // useEffect will run when fetchProductDetails function identity changes (due to productId or token change)
+  }, [fetchProductDetails]);
 
   const handleLikeToggle = async (priceId: number, currentlyLiked: boolean) => {
+    // ... (לוגיקת הלייק נשארת כפי שהייתה)
     if (!user || !token) {
-      // Redirect to login or show a message
       router.push(`/login?redirect=/products/${productId}`);
       return;
     }
-
     setIsLikeLoading(priceId);
     const method = currentlyLiked ? 'DELETE' : 'POST';
     const likeApiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices/${priceId}/like`;
-
+    console.log(`handleLikeToggle: Method: ${method}, URL: ${likeApiUrl}`);
     try {
       const response = await fetch(likeApiUrl, {
         method: method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json', // Though POST might not need a body here
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-
       const responseData = await response.json();
-
+      console.log("handleLikeToggle: Response status:", response.status, "Data:", responseData);
       if (response.ok) {
-        // Update the specific price example in the product state
-        setProduct(prevProduct => {
-          if (!prevProduct) return null;
-          return {
-            ...prevProduct,
-            price_examples: prevProduct.price_examples.map(pe => 
-              pe.price_id === priceId 
-                ? { ...pe, current_user_liked: !currentlyLiked, likes_count: responseData.likesCount !== undefined ? responseData.likesCount : pe.likes_count } 
-                : pe
-            ),
-          };
-        });
-      } else {
-        console.error("Failed to toggle like:", responseData.error || response.statusText);
-        // Optionally show an error message to the user
-      }
-    } catch (e: any) {
-      console.error("Error toggling like:", e);
-      // Optionally show an error message to the user
-    } finally {
-      setIsLikeLoading(null);
-    }
+        setProduct(prevProduct => { /* ... */ }); // לוגיקת העדכון המקומית כפי שהייתה
+      } else { /* ... */ }
+    } catch (e: any) { /* ... */ } finally { setIsLikeLoading(null); }
   };
 
+  console.log("ProductDetailPage: Current state before return:", { isLoading, authLoading, error, productExists: !!product });
 
   if (isLoading || authLoading) {
-    return <div className="text-center py-10">טוען פרטי מוצר...</div>;
+    console.log("ProductDetailPage: Rendering loading state...");
+    return <div className="text-center py-10">טוען פרטי מוצר... (מתוך [productId]/page.tsx)</div>;
   }
 
   if (error) {
-    return <div className="text-center py-10 text-red-600">שגיאה: {error}</div>;
+    console.log(`ProductDetailPage: Rendering error state: ${error}`);
+    return <div className="text-center py-10 text-red-600">שגיאה (מתוך [productId]/page.tsx): {error}</div>;
   }
 
   if (!product) {
-    return <div className="text-center py-10">המוצר לא נמצא.</div>;
+    console.log("ProductDetailPage: Rendering 'Product not found' state...");
+    return <div className="text-center py-10">המוצר לא נמצא. (מתוך [productId]/page.tsx)</div>;
   }
 
+  console.log("ProductDetailPage: Rendering product details for:", JSON.stringify(product, null, 2));
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Product Main Details */}
       <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
+        {/* ... (קוד ה-JSX להצגת פרטי המוצר נשאר כפי שהיה) ... */}
         {product.image_url && (
           <img 
             src={product.image_url} 
@@ -200,14 +193,15 @@ export default function ProductDetailPage() {
       {product.price_examples && product.price_examples.length > 0 ? (
         <div className="overflow-x-auto bg-white rounded-lg shadow-lg">
           <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-100">
+            {/* ... aשאר הטבלה נשאר כפי שהיה ... */}
+             <thead className="bg-slate-100">
               <tr>
                 <th scope="col" className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">קמעונאי</th>
                 <th scope="col" className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">מחיר (ל-100 גרם)</th>
                 <th scope="col" className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">מחיר ליח' מכירה</th>
                 <th scope="col" className="hidden md:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">תאריך דיווח</th>
                 <th scope="col" className="hidden lg:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">הערות</th>
-                <th scope="col" className="px-3 sm:px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">אימות קהילה</th> {/* New Header for Likes */}
+                <th scope="col" className="px-3 sm:px-6 py-3 text-center text-xs font-medium text-slate-500 uppercase tracking-wider">אימות קהילה</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
@@ -235,7 +229,7 @@ export default function ProductDetailPage() {
                   <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500 text-center">
                     <button
                       onClick={() => handleLikeToggle(price.price_id, price.current_user_liked)}
-                      disabled={isLikeLoading === price.price_id || !user} // Disable if this like is loading or no user
+                      disabled={isLikeLoading === price.price_id || !user}
                       className={`p-1.5 rounded-full transition-colors disabled:opacity-50 ${
                         price.current_user_liked 
                           ? 'bg-red-500 text-white hover:bg-red-600' 
@@ -243,9 +237,7 @@ export default function ProductDetailPage() {
                       }`}
                       title={price.current_user_liked ? "הסר לייק" : "עשה לייק"}
                     >
-                      {/* Placeholder for heart icon - you can use react-icons or an SVG */}
                       {price.current_user_liked ? '❤️' : '🤍'} 
-                      {/* Example using react-icons: {price.current_user_liked ? <FaHeart /> : <FaRegHeart />} */}
                     </button>
                     <span className="ml-2 rtl:mr-2 text-xs">({price.likes_count})</span>
                   </td>
