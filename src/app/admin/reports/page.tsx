@@ -2,8 +2,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useAuth } from '@/contexts/AuthContext'; //
+import Link from 'next/link'; // ייבוא Link אם תרצה להוסיף קישורים בעתיד
+import { useAuth } from '@/contexts/AuthContext';
+import AdminPagination from '@/components/AdminPagination'; // ייבוא רכיב העימוד
 
 // ממשק לדיווח מחיר כפי שהוא מגיע מה-API
 interface PriceReport {
@@ -16,16 +17,16 @@ interface PriceReport {
   reporting_user_name: string | null;
   reporting_user_email: string | null;
   price_submission_date: string;
-  regular_price: string | number; // יכול להגיע כמחרוזת מה-API
-  sale_price: string | number | null; // יכול להגיע כמחרוזת מה-API
+  regular_price: string | number; 
+  sale_price: string | number | null;
   is_on_sale: boolean;
   unit_for_price: string;
   quantity_for_price: number;
   status: string;
   notes: string | null;
   created_at: string;
-  likes_count?: number; // אופציונלי, מה-API
-  current_user_liked?: boolean; // אופציונלי, מה-API
+  likes_count?: number;
+  current_user_liked?: boolean;
 }
 
 interface ApiReportsResponse {
@@ -34,22 +35,27 @@ interface ApiReportsResponse {
     total_items?: number;
     limit?: number;
     offset?: number;
+    current_page_count?: number;
+    total_pages?: number;
   };
 }
 
 export default function AdminPriceReportsPage() {
-  console.log("AdminPriceReportsPage - RENDERING - V5 (with toFixed fix)");
+  console.log("AdminPriceReportsPage.tsx - RENDERING - V6 (with handlePageChange defined)");
 
-  const { token, user, isLoading: authIsLoading } = useAuth(); //
+  const { token, user, isLoading: authIsLoading } = useAuth();
   const [reports, setReports] = useState<PriceReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('pending_approval'); 
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<number, boolean>>({});
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const ITEMS_PER_PAGE = 15; 
 
-  const fetchAdminPriceReports = useCallback(async () => {
+  const fetchAdminPriceReports = useCallback(async (pageToFetch = 1) => {
     if (!token || !user || user.role !== 'admin') {
       setError("אין לך הרשאה לצפות בדף זה או שאינך מחובר.");
       setIsLoading(false);
@@ -58,12 +64,14 @@ export default function AdminPriceReportsPage() {
 
     setIsLoading(true);
     setError(null);
-    let apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices?limit=50&sort_by=pr.created_at&order=DESC`;
+    
+    const offset = (pageToFetch - 1) * ITEMS_PER_PAGE;
+    let apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices?limit=${ITEMS_PER_PAGE}&offset=${offset}&sort_by=pr.created_at&order=DESC`;
     if (filterStatus !== 'all') {
       apiUrl += `&status=${filterStatus}`;
     }
     
-    console.log("fetchAdminPriceReports: Attempting to fetch. Token exists:", !!token, "User role:", user?.role, "API URL:", apiUrl);
+    console.log("fetchAdminPriceReports: Fetching from URL:", apiUrl);
 
     try {
       const response = await fetch(apiUrl, {
@@ -80,25 +88,52 @@ export default function AdminPriceReportsPage() {
 
       const data: ApiReportsResponse = await response.json();
       setReports(data.data || []);
+      if (data.page_info && data.page_info.total_items !== undefined && data.page_info.limit !== undefined) {
+        setTotalPages(Math.ceil(data.page_info.total_items / data.page_info.limit));
+      } else if (data.data && data.data.length === 0 && data.page_info?.total_items === 0) {
+        setTotalPages(0);
+      } else if (data.data && data.data.length > 0 && (!data.page_info || data.page_info.total_items === undefined)) {
+        setTotalPages(1);
+      } else {
+        setTotalPages(0);
+      }
+      setCurrentPage(pageToFetch);
+
     } catch (e: any) {
       console.error("Failed to fetch admin price reports:", e);
       setError(e.message || 'Failed to load price reports.');
+      setTotalPages(0);
     } finally {
       setIsLoading(false);
     }
-  }, [token, user, filterStatus]);
+  }, [token, user, filterStatus, ITEMS_PER_PAGE]); 
 
   useEffect(() => {
-    console.log("AdminPriceReportsPage: useEffect triggered. Auth isLoading:", authIsLoading, "User exists:", !!user, "Token exists:", !!token);
-    if (!authIsLoading) {
-      if (user && token) {
-        fetchAdminPriceReports();
+    console.log("AdminPriceReportsPage: Main useEffect triggered. Auth isLoading:", authIsLoading, "User exists:", !!user, "Token exists:", !!token, "CurrentPage:", currentPage, "FilterStatus:", filterStatus);
+    if (!authIsLoading) { 
+      if (user && token) { 
+          fetchAdminPriceReports(currentPage); 
       } else {
-        setError("יש להתחבר כאדמין כדי לצפות בדף זה.");
-        setIsLoading(false);
+          setError("יש להתחבר כאדמין כדי לצפות בדף זה.");
+          setIsLoading(false); 
       }
     }
-  }, [authIsLoading, user, token, fetchAdminPriceReports]);
+  }, [authIsLoading, user, token, currentPage, fetchAdminPriceReports]); 
+
+  // useEffect נוסף לאיפוס הדף בעת שינוי פילטר
+  useEffect(() => {
+    console.log("AdminPriceReportsPage: Filter status changed to:", filterStatus, "CurrentPage was:", currentPage);
+    if (!authIsLoading && user && token) { // ודא שאנחנו לא בטעינה ראשונית של Auth
+        if (currentPage !== 1) { // אם אנחנו לא כבר בדף הראשון
+            setCurrentPage(1); // אפס לדף הראשון, זה יפעיל את ה-useEffect הראשי
+        } else {
+            // אם כבר היינו בדף 1, והפילטר השתנה, אנחנו צריכים לקרוא ל-fetch ישירות
+            // כי ה-useEffect הראשי לא יופעל אם currentPage לא משתנה.
+            fetchAdminPriceReports(1);
+        }
+    }
+  }, [filterStatus]); // רץ רק כש-filterStatus משתנה (ותלוי גם ב-authIsLoading, user, token שהם חלק מהתנאי הפנימי)
+
 
   const handleUpdateStatus = async (reportId: number, newStatus: string) => {
     if (!token || !user || user.role !== 'admin') {
@@ -125,11 +160,17 @@ export default function AdminPriceReportsPage() {
       if (response.ok) {
         const updatedReportData: PriceReport = await response.json();
         setActionMessage(`סטטוס דיווח ${reportId} עודכן ל: ${statusDisplayNames[newStatus] || newStatus}`);
-        setReports(prevReports => 
-          prevReports.map(report => 
-            report.id === reportId ? { ...report, status: updatedReportData.status } : report
-          )
-        );
+        
+        if (filterStatus === 'all' || filterStatus === newStatus) {
+             setReports(prevReports => 
+              prevReports.map(report => 
+                report.id === reportId ? { ...report, status: updatedReportData.status } : report
+              )
+            );
+        } else {
+            fetchAdminPriceReports(currentPage); // טען מחדש עם הפילטר הנוכחי (הפריט אמור להיעלם)
+        }
+
       } else {
         let errorDetail = `HTTP error! status: ${response.status}`;
         try {
@@ -145,14 +186,19 @@ export default function AdminPriceReportsPage() {
     }
   };
 
+  // --- הוספת הפונקציה החסרה ---
+  const handlePageChange = (newPage: number) => {
+    if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
+      setCurrentPage(newPage);
+      // ה-useEffect הראשי (שתלוי ב-currentPage) יטפל בשליפת הנתונים מחדש
+    }
+  };
+  // -------------------------------
+
   const statusOptions = ['all', 'pending_approval', 'approved', 'rejected', 'expired', 'edited'];
   const statusDisplayNames: Record<string, string> = {
-    pending_approval: 'ממתין לאישור',
-    approved: 'מאושר',
-    rejected: 'נדחה',
-    expired: 'פג תוקף',
-    edited: 'נערך',
-    all: 'הכל'
+    pending_approval: 'ממתין לאישור', approved: 'מאושר', rejected: 'נדחה',
+    expired: 'פג תוקף', edited: 'נערך', all: 'הכל'
   };
 
   const formatPrice = (price: string | number | null | undefined): string => {
@@ -162,8 +208,7 @@ export default function AdminPriceReportsPage() {
     return `₪${numPrice.toFixed(2)}`;
   };
 
-
-  if (authIsLoading || (isLoading && reports.length === 0)) {
+  if (authIsLoading || (isLoading && reports.length === 0 && currentPage === 1)) {
     return <div className="text-center py-10">טוען נתונים...</div>;
   }
   if (error) {
@@ -197,92 +242,103 @@ export default function AdminPriceReportsPage() {
 
       {reports.length === 0 && !isLoading && !error ? (
         <p className="text-slate-600">לא נמצאו דיווחי מחירים התואמים לסינון.</p>
-      ) : !isLoading && reports.length > 0 ? (
-        <div className="overflow-x-auto bg-white rounded-lg shadow">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-100">
-              <tr>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">ID</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">מוצר</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">קמעונאי</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">משתמש מדווח</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">מחיר</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">תאריך דיווח</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">סטטוס נוכחי</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">פעולות</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
-              {reports.map((report) => (
-                <tr key={report.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-4 text-sm text-slate-500">{report.id}</td>
-                  <td className="px-3 py-4 text-sm text-slate-900">{report.product_name}</td>
-                  <td className="px-3 py-4 text-sm text-slate-500">{report.retailer_name}</td>
-                  <td className="px-3 py-4 text-sm text-slate-500" title={report.reporting_user_email || ''}>{report.reporting_user_name || 'אנונימי'}</td>
-                  <td className="px-3 py-4 text-sm text-slate-500">
-                    {report.is_on_sale && report.sale_price != null ? 
-                      (<>
-                        <span className="line-through text-slate-400">
-                          {formatPrice(report.regular_price)}
-                        </span> 
-                        <span className="font-bold text-red-600 ml-1 rtl:mr-1">
-                          {formatPrice(report.sale_price)}
-                        </span>
-                      </>) : 
-                      formatPrice(report.regular_price)
-                    }
-                    <span className="text-xs text-slate-400"> ({report.quantity_for_price} {report.unit_for_price})</span>
-                  </td>
-                  <td className="px-3 py-4 text-sm text-slate-500">{new Date(report.price_submission_date).toLocaleDateString('he-IL')}</td>
-                  <td className="px-3 py-4 text-sm text-slate-500">
-                    <span className={`px-2 py-1 inline-flex text-xs leading-tight font-semibold rounded-full ${
-                        report.status === 'approved' ? 'bg-green-100 text-green-800' :
-                        report.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                        report.status === 'pending_approval' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-slate-100 text-slate-800' 
-                    }`}>
-                        {statusDisplayNames[report.status] || report.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-4 text-sm font-medium whitespace-nowrap">
-                    {report.status === 'pending_approval' && (
-                      <>
-                        <button 
-                          onClick={() => handleUpdateStatus(report.id, 'approved')} 
-                          disabled={isUpdatingStatus[report.id]}
-                          className="text-green-600 hover:text-green-800 mr-2 rtl:ml-2 disabled:opacity-50">
-                            {isUpdatingStatus[report.id] ? 'מאשר...' : 'אשר'}
-                        </button>
-                        <button 
-                          onClick={() => handleUpdateStatus(report.id, 'rejected')} 
-                          disabled={isUpdatingStatus[report.id]}
-                          className="text-red-600 hover:text-red-800 disabled:opacity-50">
-                            {isUpdatingStatus[report.id] ? 'דוחה...' : 'דחה'}
-                        </button>
-                      </>
-                    )}
-                    {report.status === 'approved' && (
-                       <button 
-                         onClick={() => handleUpdateStatus(report.id, 'rejected')} 
-                         disabled={isUpdatingStatus[report.id]}
-                         className="text-orange-600 hover:text-orange-800 disabled:opacity-50">
-                           {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך לנדחה'}
-                        </button>
-                    )}
-                    {report.status === 'rejected' && (
-                       <button 
-                         onClick={() => handleUpdateStatus(report.id, 'approved')} 
-                         disabled={isUpdatingStatus[report.id]}
-                         className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
-                           {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך למאושר'}
-                        </button>
-                    )}
-                  </td>
+      ) : reports.length > 0 ? ( 
+        <>
+          <div className="overflow-x-auto bg-white rounded-lg shadow">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">ID</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">מוצר</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">קמעונאי</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">משתמש מדווח</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">מחיר</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">תאריך דיווח</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">סטטוס נוכחי</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-slate-500 uppercase">פעולות</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {reports.map((report) => (
+                  <tr key={report.id} className="hover:bg-slate-50">
+                    <td className="px-3 py-4 text-sm text-slate-500">{report.id}</td>
+                    <td className="px-3 py-4 text-sm text-slate-900">{report.product_name}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500">{report.retailer_name}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500" title={report.reporting_user_email || ''}>{report.reporting_user_name || 'אנונימי'}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500">
+                      {report.is_on_sale && report.sale_price != null ? 
+                        (<>
+                          <span className="line-through text-slate-400">
+                            {formatPrice(report.regular_price)}
+                          </span> 
+                          <span className="font-bold text-red-600 ml-1 rtl:mr-1">
+                            {formatPrice(report.sale_price)}
+                          </span>
+                        </>) : 
+                        formatPrice(report.regular_price)
+                      }
+                      <span className="text-xs text-slate-400"> ({report.quantity_for_price} {report.unit_for_price})</span>
+                    </td>
+                    <td className="px-3 py-4 text-sm text-slate-500">{new Date(report.price_submission_date).toLocaleDateString('he-IL')}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-tight font-semibold rounded-full ${
+                          report.status === 'approved' ? 'bg-green-100 text-green-800' :
+                          report.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                          report.status === 'pending_approval' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-slate-100 text-slate-800' 
+                      }`}>
+                          {statusDisplayNames[report.status] || report.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 text-sm font-medium whitespace-nowrap">
+                      {report.status === 'pending_approval' && (
+                        <>
+                          <button 
+                            onClick={() => handleUpdateStatus(report.id, 'approved')} 
+                            disabled={isUpdatingStatus[report.id]}
+                            className="text-green-600 hover:text-green-800 mr-2 rtl:ml-2 disabled:opacity-50">
+                              {isUpdatingStatus[report.id] ? 'מאשר...' : 'אשר'}
+                          </button>
+                          <button 
+                            onClick={() => handleUpdateStatus(report.id, 'rejected')} 
+                            disabled={isUpdatingStatus[report.id]}
+                            className="text-red-600 hover:text-red-800 disabled:opacity-50">
+                              {isUpdatingStatus[report.id] ? 'דוחה...' : 'דחה'}
+                          </button>
+                        </>
+                      )}
+                      {report.status === 'approved' && (
+                         <button 
+                           onClick={() => handleUpdateStatus(report.id, 'rejected')} 
+                           disabled={isUpdatingStatus[report.id]}
+                           className="text-orange-600 hover:text-orange-800 disabled:opacity-50">
+                             {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך לנדחה'}
+                          </button>
+                      )}
+                      {report.status === 'rejected' && (
+                         <button 
+                           onClick={() => handleUpdateStatus(report.id, 'approved')} 
+                           disabled={isUpdatingStatus[report.id]}
+                           className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                             {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך למאושר'}
+                          </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="mt-6 flex justify-center">
+              <AdminPagination 
+                currentPage={currentPage} 
+                totalPages={totalPages} 
+                onPageChange={handlePageChange} // כאן השתמשנו בפונקציה
+              />
+            </div>
+          )}
+        </>
       ) : null}
     </div>
   );
