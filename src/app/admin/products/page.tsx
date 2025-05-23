@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext'; //
 
-// ממשק למוצר כפי שהוא מגיע מה-API (התאם לפי הצורך)
+// ממשק למוצר כפי שהוא מגיע מה-API
 interface Product {
   id: number;
   name: string;
@@ -15,36 +15,41 @@ interface Product {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  // הוסף שדות נוספים שתרצה להציג בטבלה
 }
 
 interface ApiResponse {
   data: Product[];
-  page_info?: { // page_info הוא אופציונלי בשלב זה
+  page_info?: {
     total_items?: number;
     limit?: number;
     offset?: number;
-    // ...
   };
 }
 
 export default function AdminProductsPage() {
-  const { token, user } = useAuth(); //
+  console.log("AdminProductsPage.tsx - RENDERING - V4 (with full delete logic)"); // לוג גרסה
+
+  const { token, user, isLoading: authIsLoading } = useAuth(); // הוספת authIsLoading
   const [products, setProducts] = useState<Product[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // טעינה כללית לדף
   const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<Record<number, boolean>>({});
 
   const fetchAdminProducts = useCallback(async () => {
-    if (!token || (user && user.role !== 'admin')) {
-      setError("אין לך הרשאה לצפות בדף זה.");
+    // ודא שיש טוקן ושהמשתמש הוא אדמין לפני שליחת הבקשה
+    if (!token || !user || user.role !== 'admin') {
+      setError("אין לך הרשאה לצפות בדף זה או שאינך מחובר.");
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    // עדכן את כתובת ה-API שלך בהתאם
-    const apiUrl = 'https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products?limit=100'; // שלוף כמות גדולה יותר לאדמין או הוסף עימוד
+    const apiUrl = 'https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products?limit=100'; 
+
+    console.log("fetchAdminProducts: Attempting to fetch. Token exists:", !!token);
+    console.log("fetchAdminProducts: User role:", user?.role);
 
     try {
       const response = await fetch(apiUrl, {
@@ -67,14 +72,76 @@ export default function AdminProductsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [token, user]);
+  }, [token, user]); // user נוסף כתלות
 
   useEffect(() => {
-    fetchAdminProducts();
-  }, [fetchAdminProducts]);
+    console.log("AdminProductsPage: useEffect triggered. Auth isLoading:", authIsLoading, "User exists:", !!user, "Token exists:", !!token);
+    if (!authIsLoading) { // המתן לסיום טעינת נתוני האימות
+      if (user && token) { 
+          fetchAdminProducts();
+      } else {
+          setError("יש להתחבר כאדמין כדי לצפות בדף זה.");
+          setIsLoading(false); // הפסק טעינה אם אין משתמש/טוקן
+      }
+    }
+  }, [authIsLoading, user, token, fetchAdminProducts]); // הוספת token ו-authIsLoading לתלויות
 
-  if (isLoading) {
-    return <div className="text-center py-10">טוען רשימת מוצרים...</div>;
+  const handleDeleteProduct = async (productId: number, productName: string) => {
+    console.log(`handleDeleteProduct CALLED - For product ID: ${productId}, Name: ${productName}`);
+    
+    if (!token || (user && user.role !== 'admin')) {
+      setActionMessage("שגיאה: אין לך הרשאה לבצע פעולה זו.");
+      console.log("handleDeleteProduct: Permission denied.");
+      return;
+    }
+
+    const confirmDelete = window.confirm(`האם אתה בטוח שברצונך למחוק את המוצר "${productName}" (ID: ${productId})? פעולה זו אינה הפיכה.`);
+    if (!confirmDelete) {
+      console.log("handleDeleteProduct: Delete cancelled by user.");
+      return;
+    }
+
+    setActionMessage(null); 
+    setIsDeleting(prev => ({ ...prev, [productId]: true })); 
+    
+    const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products/${productId}`;
+    console.log("handleDeleteProduct: Attempting to DELETE from URL:", apiUrl);
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      console.log("handleDeleteProduct: Delete API response status:", response.status);
+
+      if (response.status === 204 || response.ok) { 
+        setActionMessage(`המוצר "${productName}" נמחק בהצלחה.`);
+        fetchAdminProducts(); 
+      } else {
+        // נסה לקרוא את גוף השגיאה אם קיים
+        let errorDetail = `HTTP error! status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorDetail = errorData.error || errorData.message || errorDetail;
+        } catch (e) {
+            // אם אין גוף JSON או שהוא לא תקין, השתמש בהודעה הכללית
+        }
+        console.error("Error deleting product:", errorDetail);
+        setActionMessage(`אירעה שגיאה במחיקת המוצר: ${errorDetail}`);
+      }
+    } catch (e: any) {
+      console.error("Failed to delete product (exception):", e);
+      setActionMessage(`שגיאת רשת במחיקת המוצר: ${e.message}`);
+    } finally {
+      setIsDeleting(prev => ({ ...prev, [productId]: false }));
+    }
+  };
+
+  if (authIsLoading || (isLoading && products.length === 0)) { 
+    return <div className="text-center py-10">טוען נתונים...</div>;
   }
 
   if (error) {
@@ -86,16 +153,22 @@ export default function AdminProductsPage() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-slate-800">ניהול מוצרים</h1>
         <Link
-          href="/admin/products/new" // נתיב ליצירת מוצר חדש (נוסיף בעתיד)
+          href="/admin/products/new"
           className="bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 px-4 rounded-md shadow-md transition-colors"
         >
           הוסף מוצר חדש
         </Link>
       </div>
 
-      {products.length === 0 ? (
+      {actionMessage && (
+        <div className={`p-4 mb-4 text-sm rounded-md ${actionMessage.includes('בהצלחה') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+          {actionMessage}
+        </div>
+      )}
+
+      {products.length === 0 && !isLoading && !error ? (
         <p className="text-slate-600">לא נמצאו מוצרים במערכת.</p>
-      ) : (
+      ) : !isLoading && products.length > 0 ? ( 
         <div className="overflow-x-auto bg-white rounded-lg shadow">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-100">
@@ -126,12 +199,12 @@ export default function AdminProductsPage() {
                     <Link href={`/admin/products/edit/${product.id}`} className="text-sky-600 hover:text-sky-800 mr-3 rtl:ml-3 rtl:mr-0">
                       ערוך
                     </Link>
-                    {/* כפתור מחיקה (נוסיף לוגיקה בעתיד) */}
                     <button 
-                      onClick={() => alert(`TODO: Implement delete for product ID ${product.id}`)}
-                      className="text-red-600 hover:text-red-800"
+                      onClick={() => handleDeleteProduct(product.id, product.name)}
+                      className="text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isDeleting[product.id] || isLoading} 
                     >
-                      מחק
+                      {isDeleting[product.id] ? 'מוחק...' : 'מחק'}
                     </button>
                   </td>
                 </tr>
@@ -139,8 +212,7 @@ export default function AdminProductsPage() {
             </tbody>
           </table>
         </div>
-      )}
-      {/* כאן נוכל להוסיף בעתיד רכיב עימוד אם יש הרבה מוצרים */}
+      ) : null } 
     </div>
   );
 }
