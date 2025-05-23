@@ -2,8 +2,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link'; // ייבוא Link אם תרצה להוסיף קישורים בעתיד
-import { useAuth } from '@/contexts/AuthContext';
+import Link from 'next/link'; // נשאיר למקרה שנרצה להוסיף קישורים
+import { useAuth } from '@/contexts/AuthContext'; //
 import AdminPagination from '@/components/AdminPagination'; // ייבוא רכיב העימוד
 
 // ממשק לדיווח מחיר כפי שהוא מגיע מה-API
@@ -41,9 +41,9 @@ interface ApiReportsResponse {
 }
 
 export default function AdminPriceReportsPage() {
-  console.log("AdminPriceReportsPage.tsx - RENDERING - V6 (with handlePageChange defined)");
+  console.log("AdminPriceReportsPage.tsx - RENDERING - V6 (with Pagination Component)");
 
-  const { token, user, isLoading: authIsLoading } = useAuth();
+  const { token, user, isLoading: authIsLoading } = useAuth(); //
   const [reports, setReports] = useState<PriceReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +51,7 @@ export default function AdminPriceReportsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('pending_approval'); 
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<number, boolean>>({});
 
+  // States לעימוד
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const ITEMS_PER_PAGE = 15; 
@@ -120,20 +121,16 @@ export default function AdminPriceReportsPage() {
     }
   }, [authIsLoading, user, token, currentPage, fetchAdminPriceReports]); 
 
-  // useEffect נוסף לאיפוס הדף בעת שינוי פילטר
   useEffect(() => {
     console.log("AdminPriceReportsPage: Filter status changed to:", filterStatus, "CurrentPage was:", currentPage);
-    if (!authIsLoading && user && token) { // ודא שאנחנו לא בטעינה ראשונית של Auth
-        if (currentPage !== 1) { // אם אנחנו לא כבר בדף הראשון
-            setCurrentPage(1); // אפס לדף הראשון, זה יפעיל את ה-useEffect הראשי
+    if (!authIsLoading && user && token) { 
+        if (currentPage !== 1) { 
+            setCurrentPage(1); 
         } else {
-            // אם כבר היינו בדף 1, והפילטר השתנה, אנחנו צריכים לקרוא ל-fetch ישירות
-            // כי ה-useEffect הראשי לא יופעל אם currentPage לא משתנה.
             fetchAdminPriceReports(1);
         }
     }
-  }, [filterStatus]); // רץ רק כש-filterStatus משתנה (ותלוי גם ב-authIsLoading, user, token שהם חלק מהתנאי הפנימי)
-
+  }, [filterStatus]); // תלות ב-filterStatus בלבד, כדי שה-useEffect הראשי יטפל בשאר
 
   const handleUpdateStatus = async (reportId: number, newStatus: string) => {
     if (!token || !user || user.role !== 'admin') {
@@ -145,7 +142,6 @@ export default function AdminPriceReportsPage() {
     setIsUpdatingStatus(prev => ({ ...prev, [reportId]: true }));
     
     const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices/${reportId}/status`;
-    console.log(`handleUpdateStatus: Updating report ${reportId} to status ${newStatus} via URL: ${apiUrl}`);
 
     try {
       const response = await fetch(apiUrl, {
@@ -161,6 +157,7 @@ export default function AdminPriceReportsPage() {
         const updatedReportData: PriceReport = await response.json();
         setActionMessage(`סטטוס דיווח ${reportId} עודכן ל: ${statusDisplayNames[newStatus] || newStatus}`);
         
+        // אם הפילטר הנוכחי הוא 'all' או הסטטוס החדש, עדכן את הפריט ברשימה
         if (filterStatus === 'all' || filterStatus === newStatus) {
              setReports(prevReports => 
               prevReports.map(report => 
@@ -168,9 +165,10 @@ export default function AdminPriceReportsPage() {
               )
             );
         } else {
-            fetchAdminPriceReports(currentPage); // טען מחדש עם הפילטר הנוכחי (הפריט אמור להיעלם)
+            // אם הסטטוס החדש לא תואם לפילטר, הסר את הפריט מהתצוגה הנוכחית
+            // או טען מחדש (כך ה-total_items יתעדכן נכון)
+            fetchAdminPriceReports(currentPage); 
         }
-
       } else {
         let errorDetail = `HTTP error! status: ${response.status}`;
         try {
@@ -185,15 +183,12 @@ export default function AdminPriceReportsPage() {
       setIsUpdatingStatus(prev => ({ ...prev, [reportId]: false }));
     }
   };
-
-  // --- הוספת הפונקציה החסרה ---
+  
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
       setCurrentPage(newPage);
-      // ה-useEffect הראשי (שתלוי ב-currentPage) יטפל בשליפת הנתונים מחדש
     }
   };
-  // -------------------------------
 
   const statusOptions = ['all', 'pending_approval', 'approved', 'rejected', 'expired', 'edited'];
   const statusDisplayNames: Record<string, string> = {
@@ -323,18 +318,20 @@ export default function AdminPriceReportsPage() {
                              {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך למאושר'}
                           </button>
                       )}
+                      {/* אפשר להוסיף כאן כפתור 'ערוך דיווח' שיוביל לדף עריכה מלא של הדיווח */}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {/* שילוב רכיב העימוד */}
           {totalPages > 1 && (
             <div className="mt-6 flex justify-center">
               <AdminPagination 
                 currentPage={currentPage} 
                 totalPages={totalPages} 
-                onPageChange={handlePageChange} // כאן השתמשנו בפונקציה
+                onPageChange={handlePageChange} 
               />
             </div>
           )}
