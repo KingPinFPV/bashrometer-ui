@@ -4,9 +4,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext'; //
 
-// Interfaces
+// Interfaces (כפי שהיו אצלך)
 interface PriceExample {
   price_id: number;
   retailer_id: number;
@@ -42,21 +42,32 @@ interface ProductDetailed {
   price_examples: PriceExample[];
 }
 
+// ממשק לתשובת ה-API של הלייק
+interface LikeApiResponse {
+  message: string;
+  priceId: number;
+  userId: number;
+  likesCount: number;
+  userLiked: boolean;
+}
+
 export default function ProductDetailPage() {
-  console.log("RENDERING: ProductDetailPage component"); // לוג בכניסה לרכיב
+  console.log("RENDERING: ProductDetailPage component");
 
   const params = useParams();
   const router = useRouter();
   const productId = params.productId as string;
-  const { user, token, isLoading: authLoading } = useAuth();
+  const { user, token, isLoading: authLoading } = useAuth(); //
 
   const [product, setProduct] = useState<ProductDetailed | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isLikeLoading, setIsLikeLoading] = useState<number | null>(null);
+  // State to track loading state for individual like buttons
+  const [likeActionLoading, setLikeActionLoading] = useState<Record<number, boolean>>({});
+
 
   const fetchProductDetails = useCallback(async () => {
-    console.log(`WorkspaceProductDetails: Called for productId: ${productId}`);
+    console.log(`ProductDetailPage: fetchProductDetails called for productId: ${productId}`);
     if (!productId) {
       console.error("fetchProductDetails: No productId provided.");
       setIsLoading(false);
@@ -66,7 +77,7 @@ export default function ProductDetailPage() {
     setIsLoading(true);
     setError(null);
     const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/products/${productId}`;
-    console.log(`WorkspaceProductDetails: Fetching from API URL: ${apiUrl}`);
+    console.log(`ProductDetailPage: Fetching from API URL: ${apiUrl}`);
 
     try {
       const headers: HeadersInit = {};
@@ -74,7 +85,7 @@ export default function ProductDetailPage() {
         headers['Authorization'] = `Bearer ${token}`;
       }
       const response = await fetch(apiUrl, { headers });
-      console.log(`WorkspaceProductDetails: API response status: ${response.status} for productId: ${productId}`);
+      console.log(`ProductDetailPage: API response status: ${response.status} for productId: ${productId}`);
 
       if (!response.ok) {
         let errorData;
@@ -88,68 +99,103 @@ export default function ProductDetailPage() {
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       const data: ProductDetailed = await response.json();
-      console.log(`WorkspaceProductDetails: Data received from API for productId ${productId}:`, JSON.stringify(data, null, 2));
+      console.log(`ProductDetailPage: Data received from API for productId ${productId}:`, data);
       setProduct(data);
     } catch (e: any) {
-      console.error(`WorkspaceProductDetails: Error fetching product details for productId ${productId}:`, e);
+      console.error(`ProductDetailPage: Error fetching product details for productId ${productId}:`, e);
       setError(e.message || 'Failed to load product details.');
     } finally {
       setIsLoading(false);
-      console.log(`WorkspaceProductDetails: Finished for productId: ${productId}`);
+      console.log(`ProductDetailPage: fetchProductDetails finished for productId: ${productId}`);
     }
   }, [productId, token]);
 
   useEffect(() => {
     console.log("ProductDetailPage useEffect for fetchProductDetails triggered.");
-    fetchProductDetails();
-  }, [fetchProductDetails]);
+    if (productId) { // Only fetch if productId is available
+        fetchProductDetails();
+    }
+  }, [productId, fetchProductDetails]); // Include fetchProductDetails in dependency array
 
   const handleLikeToggle = async (priceId: number, currentlyLiked: boolean) => {
-    // ... (לוגיקת הלייק נשארת כפי שהייתה)
-    if (!user || !token) {
+    if (!user || !token) { ///page.tsx]
       router.push(`/login?redirect=/products/${productId}`);
       return;
     }
-    setIsLikeLoading(priceId);
+
+    setLikeActionLoading(prev => ({ ...prev, [priceId]: true })); // Set loading for this specific like button
+
     const method = currentlyLiked ? 'DELETE' : 'POST';
     const likeApiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices/${priceId}/like`;
-    console.log(`handleLikeToggle: Method: ${method}, URL: ${likeApiUrl}`);
+    console.log(`handleLikeToggle: PriceID: ${priceId}, Method: ${method}, URL: ${likeApiUrl}`);
+
     try {
-      const response = await fetch(likeApiUrl, {
+      const requestOptions: RequestInit = {
         method: method,
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      });
-      const responseData = await response.json();
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      };
+
+      if (method === 'POST') {
+        requestOptions.body = JSON.stringify({}); // שלח גוף JSON ריק עבור POST
+      }
+
+      const response = await fetch(likeApiUrl, requestOptions);
+      const responseData: LikeApiResponse | { error: string } = await response.json(); // קבלת התשובה מהשרת
+      
       console.log("handleLikeToggle: Response status:", response.status, "Data:", responseData);
-      if (response.ok) {
-        setProduct(prevProduct => { /* ... */ }); // לוגיקת העדכון המקומית כפי שהייתה
-      } else { /* ... */ }
-    } catch (e: any) { /* ... */ } finally { setIsLikeLoading(null); }
+
+      if (response.ok && 'likesCount' in responseData && 'userLiked' in responseData) {
+        // עדכון המצב המקומי עם הנתונים מהשרת
+        setProduct(prevProduct => {
+          if (!prevProduct) return null;
+          return {
+            ...prevProduct,
+            price_examples: prevProduct.price_examples.map(example =>
+              example.price_id === priceId
+                ? { ...example, likes_count: responseData.likesCount, current_user_liked: responseData.userLiked }
+                : example
+            ),
+          };
+        });
+      } else {
+        const errorMsg = (responseData as { error: string }).error || `Failed to ${currentlyLiked ? 'unlike' : 'like'} price report.`;
+        console.error("handleLikeToggle: Error - ", errorMsg);
+        // כאן תוכל להציג הודעת שגיאה למשתמש אם תרצה
+        alert(`שגיאה בפעולת הלייק: ${errorMsg}`);
+      }
+    } catch (e: any) {
+      console.error(`handleLikeToggle: Exception - Failed to ${currentlyLiked ? 'unlike' : 'like'} price report:`, e);
+      alert(`שגיאת רשת בפעולת הלייק: ${e.message}`);
+    } finally {
+      setLikeActionLoading(prev => ({ ...prev, [priceId]: false })); // הסר מצב טעינה מכפתור הלייק
+    }
   };
 
   console.log("ProductDetailPage: Current state before return:", { isLoading, authLoading, error, productExists: !!product });
 
-  if (isLoading || authLoading) {
+  if (isLoading || authLoading) { ///page.tsx]
     console.log("ProductDetailPage: Rendering loading state...");
     return <div className="text-center py-10">טוען פרטי מוצר... (מתוך [productId]/page.tsx)</div>;
   }
 
-  if (error) {
+  if (error) { ///page.tsx]
     console.log(`ProductDetailPage: Rendering error state: ${error}`);
     return <div className="text-center py-10 text-red-600">שגיאה (מתוך [productId]/page.tsx): {error}</div>;
   }
 
-  if (!product) {
+  if (!product) { ///page.tsx]
     console.log("ProductDetailPage: Rendering 'Product not found' state...");
     return <div className="text-center py-10">המוצר לא נמצא. (מתוך [productId]/page.tsx)</div>;
   }
 
-  console.log("ProductDetailPage: Rendering product details for:", JSON.stringify(product, null, 2));
+  console.log("ProductDetailPage: Rendering product details for:", product.name); // הצג רק שם כדי למנוע לוג ארוך מדי
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Product Main Details */}
       <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
-        {/* ... (קוד ה-JSX להצגת פרטי המוצר נשאר כפי שהיה) ... */}
         {product.image_url && (
           <img 
             src={product.image_url} 
@@ -193,7 +239,6 @@ export default function ProductDetailPage() {
       {product.price_examples && product.price_examples.length > 0 ? (
         <div className="overflow-x-auto bg-white rounded-lg shadow-lg">
           <table className="min-w-full divide-y divide-slate-200">
-            {/* ... aשאר הטבלה נשאר כפי שהיה ... */}
              <thead className="bg-slate-100">
               <tr>
                 <th scope="col" className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">קמעונאי</th>
@@ -229,7 +274,7 @@ export default function ProductDetailPage() {
                   <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-slate-500 text-center">
                     <button
                       onClick={() => handleLikeToggle(price.price_id, price.current_user_liked)}
-                      disabled={isLikeLoading === price.price_id || !user}
+                      disabled={likeActionLoading[price.price_id] || !user} // שימוש במצב טעינה ספציפי לכפתור
                       className={`p-1.5 rounded-full transition-colors disabled:opacity-50 ${
                         price.current_user_liked 
                           ? 'bg-red-500 text-white hover:bg-red-600' 
@@ -237,7 +282,15 @@ export default function ProductDetailPage() {
                       }`}
                       title={price.current_user_liked ? "הסר לייק" : "עשה לייק"}
                     >
-                      {price.current_user_liked ? '❤️' : '🤍'} 
+                      {/* הצגת אייקון טעינה אם הפעולה מתבצעת */}
+                      {likeActionLoading[price.price_id] ? (
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : (
+                        price.current_user_liked ? '❤️' : '🤍' 
+                      )}
                     </button>
                     <span className="ml-2 rtl:mr-2 text-xs">({price.likes_count})</span>
                   </td>
