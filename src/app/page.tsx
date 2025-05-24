@@ -1,30 +1,27 @@
 // src/app/page.tsx
-import Image from "next/image"; // אם תרצה להוסיף לוגו או תמונה בעתיד
+"use client";
+
+import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <div className="text-center">
-      <h1 className="text-4xl font-bold text-slate-700 mb-6">
-        ברוכים הבאים לבשרומטר 1.0!
-      </h1>
-      <p className="text-lg text-slate-600 mb-8">
-        הכלי שלכם להשוואת מחירי בשר ולמציאת הדילים הטובים ביותר.
+    <main className="px-8 py-12 max-w-4xl mx-auto">
+      <h1 className="text-4xl font-bold mb-4">בשרומטר 1.0</h1>
+      <p className="mb-8 text-lg">
+        השוו מחירי בשר בין חנויות, דווחו על הדילים הטובים ביותר וחסכו כסף!
       </p>
-      {/* כאן נוכל להוסיף בעתיד:
-        - תיבת חיפוש
-        - קישורים לקטגוריות פופולריות
-        - תצוגה של מבצעים אחרונים
-      */}
-      <div className="mt-10">
-        <Image
-          src="/next.svg" // דוגמה לתמונה, החלף בלוגו שלך אם יש
-          alt="Bashrometer Logo Placeholder"
-          width={180}
-          height={37}
-          priority
-          className="mx-auto dark:invert" // dark:invert הופך צבעים במצב כהה
-        />
+      <div className="flex gap-4">
+        <Link href="/products">
+          <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            מוצרים
+          </button>
+        </Link>
+        <Link href="/report-price">
+          <button className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+            דווח מחיר
+          </button>
+        </Link>
       </div>
-    </div>
+    </main>
   );
 }

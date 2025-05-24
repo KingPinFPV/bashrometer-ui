@@ -41,7 +41,7 @@ interface ApiReportsResponse {
 }
 
 export default function AdminPriceReportsPage() {
-  console.log("AdminPriceReportsPage.tsx - RENDERING - V7 (Final JSX and handlePageChange)");
+  console.log("AdminPriceReportsPage.tsx - RENDERING - V8 (With Search Support)");
 
   const { token, user, isLoading: authIsLoading } = useAuth();
   const [reports, setReports] = useState<PriceReport[]>([]);
@@ -84,10 +84,10 @@ export default function AdminPriceReportsPage() {
     if (currentFilterStatus !== 'all') {
       apiUrl += `&status=${currentFilterStatus}`;
     }
+    
+    // הוספת תמיכה בחיפוש טקסטואלי - עכשיו ה-API תומך בזה!
     if (currentSearchTerm.trim() !== '') {
-      // עדיין אין תמיכה בחיפוש טקסטואלי ב-API של הדיווחים, אבל נשאיר את המקום לעתיד
-      // apiUrl += `&search_term=${encodeURIComponent(currentSearchTerm.trim())}`; 
-      console.log("Note: Text search for reports is not yet implemented in the API for URL:", currentSearchTerm);
+      apiUrl += `&search=${encodeURIComponent(currentSearchTerm.trim())}`;
     }
     
     console.log("fetchAdminPriceReports: Fetching from URL:", apiUrl);
@@ -143,13 +143,20 @@ export default function AdminPriceReportsPage() {
 
 
   const handleUpdateStatus = async (reportId: number, newStatus: string) => {
-    if (!token || !user || user.role !== 'admin') { /* ... */ return; }
+    if (!token || !user || user.role !== 'admin') { 
+      setError("אין לך הרשאה לבצע פעולה זו.");
+      return; 
+    }
     setActionMessage(null);
     setIsUpdatingStatus(prev => ({ ...prev, [reportId]: true }));
     const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices/${reportId}/status`;
     try {
       const response = await fetch(apiUrl, {
-        method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        method: 'PUT', 
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({ status: newStatus }),
       });
       if (response.ok) {
@@ -164,9 +171,17 @@ export default function AdminPriceReportsPage() {
         } else {
             fetchAdminPriceReports(currentPage, debouncedSearchTerm, filterStatus); 
         }
-      } else { /* ... טיפול בשגיאה ... */ }
-    } catch (e: any) { /* ... טיפול בשגיאה ... */ } 
-    finally { setIsUpdatingStatus(prev => ({ ...prev, [reportId]: false })); }
+      } else { 
+        const errorData = await response.json().catch(() => ({ error: "Failed to parse error JSON" }));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+    } catch (e: any) { 
+      console.error("Failed to update report status:", e);
+      setActionMessage(`שגיאה בעדכון סטטוס: ${e.message}`);
+    } 
+    finally { 
+      setIsUpdatingStatus(prev => ({ ...prev, [reportId]: false })); 
+    }
   };
   
   const handlePageChange = (newPage: number) => {
@@ -175,10 +190,20 @@ export default function AdminPriceReportsPage() {
     }
   };
 
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setDebouncedSearchTerm('');
+    setCurrentPage(1);
+  };
+
   const statusOptions = ['all', 'pending_approval', 'approved', 'rejected', 'expired', 'edited'];
   const statusDisplayNames: Record<string, string> = {
-    pending_approval: 'ממתין לאישור', approved: 'מאושר', rejected: 'נדחה',
-    expired: 'פג תוקף', edited: 'נערך', all: 'הכל'
+    pending_approval: 'ממתין לאישור', 
+    approved: 'מאושר', 
+    rejected: 'נדחה',
+    expired: 'פג תוקף', 
+    edited: 'נערך', 
+    all: 'הכל'
   };
 
   const formatPrice = (price: string | number | null | undefined): string => {
@@ -200,14 +225,26 @@ export default function AdminPriceReportsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
         <h1 className="text-2xl font-bold text-slate-800">ניהול דיווחי מחירים</h1>
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-          <div className="w-full sm:w-auto">
+          <div className="relative w-full sm:w-auto">
             <input
               type="text"
-              placeholder="חפש (שם מוצר, קמעונאי...)"
+              placeholder="חפש מוצר, קמעונאי או מדווח..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="px-4 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm w-full"
+              className="px-4 py-2 pr-10 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm w-full"
             />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label="נקה חיפוש"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
           <div className="w-full sm:w-auto">
             <select 
@@ -224,17 +261,42 @@ export default function AdminPriceReportsPage() {
         </div>
       </div>
 
+      {/* הצגת מספר תוצאות ומידע על החיפוש */}
+      {(debouncedSearchTerm || filterStatus !== 'all') && reports.length > 0 && (
+        <div className="mb-4 text-sm text-gray-600">
+          נמצאו {reports.length} דיווחים
+          {debouncedSearchTerm && ` עבור החיפוש "${debouncedSearchTerm}"`}
+          {filterStatus !== 'all' && ` בסטטוס ${statusDisplayNames[filterStatus]}`}
+        </div>
+      )}
+
       {actionMessage && (
-        <div className={`p-4 mb-4 text-sm rounded-md ${actionMessage.includes('בהצלחה') || actionMessage.includes('עודכן') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+        <div className={`p-4 mb-4 text-sm rounded-md ${
+          actionMessage.includes('בהצלחה') || actionMessage.includes('עודכן') 
+            ? 'bg-green-100 text-green-700' 
+            : 'bg-red-100 text-red-700'
+        }`}>
           {actionMessage}
         </div>
       )}
 
       {/* --- מבנה תנאי מתוקן להצגת הטבלה או הודעות --- */}
       {!isLoading && reports.length === 0 && !error ? (
-        <p className="text-slate-600">
-          {debouncedSearchTerm || filterStatus !== 'all' ? `לא נמצאו דיווחים התואמים לחיפוש/סינון.` : "לא נמצאו דיווחי מחירים במערכת."}
-        </p>
+        <div className="text-center py-10">
+          <p className="text-slate-600">
+            {debouncedSearchTerm || filterStatus !== 'all' 
+              ? `לא נמצאו דיווחים התואמים לחיפוש/סינון.` 
+              : "לא נמצאו דיווחי מחירים במערכת."}
+          </p>
+          {debouncedSearchTerm && (
+            <button
+              onClick={handleClearSearch}
+              className="mt-4 text-sky-600 hover:text-sky-800"
+            >
+              נקה חיפוש
+            </button>
+          )}
+        </div>
       ) : reports.length > 0 ? ( 
         <>
           <div className="overflow-x-auto bg-white rounded-lg shadow">
@@ -257,7 +319,9 @@ export default function AdminPriceReportsPage() {
                     <td className="px-3 py-4 text-sm text-slate-500">{report.id}</td>
                     <td className="px-3 py-4 text-sm text-slate-900">{report.product_name}</td>
                     <td className="px-3 py-4 text-sm text-slate-500">{report.retailer_name}</td>
-                    <td className="px-3 py-4 text-sm text-slate-500" title={report.reporting_user_email || ''}>{report.reporting_user_name || 'אנונימי'}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500" title={report.reporting_user_email || ''}>
+                      {report.reporting_user_name || 'אנונימי'}
+                    </td>
                     <td className="px-3 py-4 text-sm text-slate-500">
                       {report.is_on_sale && report.sale_price != null ? 
                         (<>
@@ -272,7 +336,9 @@ export default function AdminPriceReportsPage() {
                       }
                       <span className="text-xs text-slate-400"> ({report.quantity_for_price} {report.unit_for_price})</span>
                     </td>
-                    <td className="px-3 py-4 text-sm text-slate-500">{new Date(report.price_submission_date).toLocaleDateString('he-IL')}</td>
+                    <td className="px-3 py-4 text-sm text-slate-500">
+                      {new Date(report.price_submission_date).toLocaleDateString('he-IL')}
+                    </td>
                     <td className="px-3 py-4 text-sm text-slate-500">
                       <span className={`px-2 py-1 inline-flex text-xs leading-tight font-semibold rounded-full ${
                           report.status === 'approved' ? 'bg-green-100 text-green-800' :
@@ -333,7 +399,9 @@ export default function AdminPriceReportsPage() {
           )}
         </>
       ) : null} 
-      {isLoading && reports.length > 0 && <div className="text-center py-4 text-slate-500">מעדכן רשימת דיווחים...</div>}
+      {isLoading && reports.length > 0 && (
+        <div className="text-center py-4 text-slate-500">מעדכן רשימת דיווחים...</div>
+      )}
     </div>
   );
 }
