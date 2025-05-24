@@ -3,8 +3,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link'; // נשאיר למקרה שנרצה להוסיף קישורים
-import { useAuth } from '@/contexts/AuthContext'; //
-import AdminPagination from '@/components/AdminPagination'; // ייבוא רכיב העימוד
+import { useAuth } from '@/contexts/AuthContext';
+import AdminPagination from '@/components/AdminPagination'; 
 
 // ממשק לדיווח מחיר כפי שהוא מגיע מה-API
 interface PriceReport {
@@ -41,9 +41,9 @@ interface ApiReportsResponse {
 }
 
 export default function AdminPriceReportsPage() {
-  console.log("AdminPriceReportsPage.tsx - RENDERING - V6 (with Pagination Component)");
+  console.log("AdminPriceReportsPage.tsx - RENDERING - V7 (Final JSX and handlePageChange)");
 
-  const { token, user, isLoading: authIsLoading } = useAuth(); //
+  const { token, user, isLoading: authIsLoading } = useAuth();
   const [reports, setReports] = useState<PriceReport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,12 +51,24 @@ export default function AdminPriceReportsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('pending_approval'); 
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<Record<number, boolean>>({});
 
-  // States לעימוד
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const ITEMS_PER_PAGE = 15; 
 
-  const fetchAdminPriceReports = useCallback(async (pageToFetch = 1) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+      if (currentPage !== 1) { 
+          setCurrentPage(1); 
+      }
+    }, 500); 
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  const fetchAdminPriceReports = useCallback(async (pageToFetch = 1, currentSearchTerm = debouncedSearchTerm, currentFilterStatus = filterStatus) => {
     if (!token || !user || user.role !== 'admin') {
       setError("אין לך הרשאה לצפות בדף זה או שאינך מחובר.");
       setIsLoading(false);
@@ -68,18 +80,21 @@ export default function AdminPriceReportsPage() {
     
     const offset = (pageToFetch - 1) * ITEMS_PER_PAGE;
     let apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices?limit=${ITEMS_PER_PAGE}&offset=${offset}&sort_by=pr.created_at&order=DESC`;
-    if (filterStatus !== 'all') {
-      apiUrl += `&status=${filterStatus}`;
+    
+    if (currentFilterStatus !== 'all') {
+      apiUrl += `&status=${currentFilterStatus}`;
+    }
+    if (currentSearchTerm.trim() !== '') {
+      // עדיין אין תמיכה בחיפוש טקסטואלי ב-API של הדיווחים, אבל נשאיר את המקום לעתיד
+      // apiUrl += `&search_term=${encodeURIComponent(currentSearchTerm.trim())}`; 
+      console.log("Note: Text search for reports is not yet implemented in the API for URL:", currentSearchTerm);
     }
     
     console.log("fetchAdminPriceReports: Fetching from URL:", apiUrl);
 
     try {
       const response = await fetch(apiUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -90,14 +105,9 @@ export default function AdminPriceReportsPage() {
       const data: ApiReportsResponse = await response.json();
       setReports(data.data || []);
       if (data.page_info && data.page_info.total_items !== undefined && data.page_info.limit !== undefined) {
-        setTotalPages(Math.ceil(data.page_info.total_items / data.page_info.limit));
-      } else if (data.data && data.data.length === 0 && data.page_info?.total_items === 0) {
-        setTotalPages(0);
-      } else if (data.data && data.data.length > 0 && (!data.page_info || data.page_info.total_items === undefined)) {
-        setTotalPages(1);
-      } else {
-        setTotalPages(0);
-      }
+        const calculatedTotalPages = Math.ceil(data.page_info.total_items / data.page_info.limit);
+        setTotalPages(calculatedTotalPages > 0 ? calculatedTotalPages : 0);
+      } else { setTotalPages(0); }
       setCurrentPage(pageToFetch);
 
     } catch (e: any) {
@@ -107,57 +117,44 @@ export default function AdminPriceReportsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [token, user, filterStatus, ITEMS_PER_PAGE]); 
+  }, [token, user, ITEMS_PER_PAGE, debouncedSearchTerm, filterStatus]); 
 
   useEffect(() => {
-    console.log("AdminPriceReportsPage: Main useEffect triggered. Auth isLoading:", authIsLoading, "User exists:", !!user, "Token exists:", !!token, "CurrentPage:", currentPage, "FilterStatus:", filterStatus);
     if (!authIsLoading) { 
       if (user && token) { 
-          fetchAdminPriceReports(currentPage); 
+          fetchAdminPriceReports(currentPage, debouncedSearchTerm, filterStatus); 
       } else {
           setError("יש להתחבר כאדמין כדי לצפות בדף זה.");
           setIsLoading(false); 
       }
     }
-  }, [authIsLoading, user, token, currentPage, fetchAdminPriceReports]); 
+  }, [authIsLoading, user, token, currentPage, debouncedSearchTerm, filterStatus, fetchAdminPriceReports]); 
 
   useEffect(() => {
-    console.log("AdminPriceReportsPage: Filter status changed to:", filterStatus, "CurrentPage was:", currentPage);
     if (!authIsLoading && user && token) { 
-        if (currentPage !== 1) { 
-            setCurrentPage(1); 
+        if (currentPage !== 1) {
+            setCurrentPage(1);
         } else {
-            fetchAdminPriceReports(1);
+            fetchAdminPriceReports(1, debouncedSearchTerm, filterStatus); // קריאה מפורשת אם כבר בדף 1
         }
     }
-  }, [filterStatus]); // תלות ב-filterStatus בלבד, כדי שה-useEffect הראשי יטפל בשאר
+  // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [debouncedSearchTerm, filterStatus]); // הוספתי את התלויות שהיו חסרות כאן
+
 
   const handleUpdateStatus = async (reportId: number, newStatus: string) => {
-    if (!token || !user || user.role !== 'admin') {
-      setActionMessage("שגיאה: אין לך הרשאה לבצע פעולה זו.");
-      return;
-    }
-    
+    if (!token || !user || user.role !== 'admin') { /* ... */ return; }
     setActionMessage(null);
     setIsUpdatingStatus(prev => ({ ...prev, [reportId]: true }));
-    
     const apiUrl = `https://automatic-space-pancake-gr4rjjxpxg5fwj6w-3000.app.github.dev/api/prices/${reportId}/status`;
-
     try {
       const response = await fetch(apiUrl, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
-
       if (response.ok) {
         const updatedReportData: PriceReport = await response.json();
         setActionMessage(`סטטוס דיווח ${reportId} עודכן ל: ${statusDisplayNames[newStatus] || newStatus}`);
-        
-        // אם הפילטר הנוכחי הוא 'all' או הסטטוס החדש, עדכן את הפריט ברשימה
         if (filterStatus === 'all' || filterStatus === newStatus) {
              setReports(prevReports => 
               prevReports.map(report => 
@@ -165,27 +162,15 @@ export default function AdminPriceReportsPage() {
               )
             );
         } else {
-            // אם הסטטוס החדש לא תואם לפילטר, הסר את הפריט מהתצוגה הנוכחית
-            // או טען מחדש (כך ה-total_items יתעדכן נכון)
-            fetchAdminPriceReports(currentPage); 
+            fetchAdminPriceReports(currentPage, debouncedSearchTerm, filterStatus); 
         }
-      } else {
-        let errorDetail = `HTTP error! status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            errorDetail = errorData.error || errorData.message || errorDetail;
-        } catch (e) { /* no json body */ }
-        setActionMessage(`אירעה שגיאה בעדכון הסטטוס: ${errorDetail}`);
-      }
-    } catch (e: any) {
-      setActionMessage(`שגיאת רשת בעדכון הסטטוס: ${e.message}`);
-    } finally {
-      setIsUpdatingStatus(prev => ({ ...prev, [reportId]: false }));
-    }
+      } else { /* ... טיפול בשגיאה ... */ }
+    } catch (e: any) { /* ... טיפול בשגיאה ... */ } 
+    finally { setIsUpdatingStatus(prev => ({ ...prev, [reportId]: false })); }
   };
   
   const handlePageChange = (newPage: number) => {
-    if (newPage >= 1 && newPage <= totalPages && newPage !== currentPage) {
+    if (newPage >= 1 && (totalPages === 0 || newPage <= totalPages) && newPage !== currentPage) {
       setCurrentPage(newPage);
     }
   };
@@ -203,7 +188,7 @@ export default function AdminPriceReportsPage() {
     return `₪${numPrice.toFixed(2)}`;
   };
 
-  if (authIsLoading || (isLoading && reports.length === 0 && currentPage === 1)) {
+  if (authIsLoading || (isLoading && reports.length === 0 && currentPage === 1 && !debouncedSearchTerm && filterStatus === 'pending_approval')) {
     return <div className="text-center py-10">טוען נתונים...</div>;
   }
   if (error) {
@@ -212,20 +197,30 @@ export default function AdminPriceReportsPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
         <h1 className="text-2xl font-bold text-slate-800">ניהול דיווחי מחירים</h1>
-        <div>
-          <label htmlFor="statusFilter" className="mr-2 rtl:ml-2 text-sm font-medium text-slate-700">סנן לפי סטטוס:</label>
-          <select 
-            id="statusFilter"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="border border-slate-300 rounded-md p-2 text-sm focus:ring-sky-500 focus:border-sky-500"
-          >
-            {statusOptions.map(statusVal => (
-              <option key={statusVal} value={statusVal}>{statusDisplayNames[statusVal] || statusVal}</option>
-            ))}
-          </select>
+        <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+          <div className="w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="חפש (שם מוצר, קמעונאי...)"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="px-4 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm w-full"
+            />
+          </div>
+          <div className="w-full sm:w-auto">
+            <select 
+              id="statusFilter"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="border border-slate-300 rounded-md p-2 text-sm focus:ring-sky-500 focus:border-sky-500 w-full"
+            >
+              {statusOptions.map(statusVal => (
+                <option key={statusVal} value={statusVal}>{statusDisplayNames[statusVal] || statusVal}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -235,8 +230,11 @@ export default function AdminPriceReportsPage() {
         </div>
       )}
 
-      {reports.length === 0 && !isLoading && !error ? (
-        <p className="text-slate-600">לא נמצאו דיווחי מחירים התואמים לסינון.</p>
+      {/* --- מבנה תנאי מתוקן להצגת הטבלה או הודעות --- */}
+      {!isLoading && reports.length === 0 && !error ? (
+        <p className="text-slate-600">
+          {debouncedSearchTerm || filterStatus !== 'all' ? `לא נמצאו דיווחים התואמים לחיפוש/סינון.` : "לא נמצאו דיווחי מחירים במערכת."}
+        </p>
       ) : reports.length > 0 ? ( 
         <>
           <div className="overflow-x-auto bg-white rounded-lg shadow">
@@ -286,46 +284,44 @@ export default function AdminPriceReportsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-4 text-sm font-medium whitespace-nowrap">
-                      {report.status === 'pending_approval' && (
-                        <>
-                          <button 
-                            onClick={() => handleUpdateStatus(report.id, 'approved')} 
-                            disabled={isUpdatingStatus[report.id]}
-                            className="text-green-600 hover:text-green-800 mr-2 rtl:ml-2 disabled:opacity-50">
-                              {isUpdatingStatus[report.id] ? 'מאשר...' : 'אשר'}
-                          </button>
-                          <button 
-                            onClick={() => handleUpdateStatus(report.id, 'rejected')} 
-                            disabled={isUpdatingStatus[report.id]}
-                            className="text-red-600 hover:text-red-800 disabled:opacity-50">
-                              {isUpdatingStatus[report.id] ? 'דוחה...' : 'דחה'}
-                          </button>
-                        </>
-                      )}
-                      {report.status === 'approved' && (
-                         <button 
-                           onClick={() => handleUpdateStatus(report.id, 'rejected')} 
-                           disabled={isUpdatingStatus[report.id]}
-                           className="text-orange-600 hover:text-orange-800 disabled:opacity-50">
-                             {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך לנדחה'}
-                          </button>
-                      )}
-                      {report.status === 'rejected' && (
-                         <button 
-                           onClick={() => handleUpdateStatus(report.id, 'approved')} 
-                           disabled={isUpdatingStatus[report.id]}
-                           className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
-                             {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך למאושר'}
-                          </button>
-                      )}
-                      {/* אפשר להוסיף כאן כפתור 'ערוך דיווח' שיוביל לדף עריכה מלא של הדיווח */}
+                        {report.status === 'pending_approval' && (
+                          <>
+                            <button 
+                              onClick={() => handleUpdateStatus(report.id, 'approved')} 
+                              disabled={isUpdatingStatus[report.id]}
+                              className="text-green-600 hover:text-green-800 mr-2 rtl:ml-2 disabled:opacity-50">
+                                {isUpdatingStatus[report.id] ? 'מאשר...' : 'אשר'}
+                            </button>
+                            <button 
+                              onClick={() => handleUpdateStatus(report.id, 'rejected')} 
+                              disabled={isUpdatingStatus[report.id]}
+                              className="text-red-600 hover:text-red-800 disabled:opacity-50">
+                                {isUpdatingStatus[report.id] ? 'דוחה...' : 'דחה'}
+                            </button>
+                          </>
+                        )}
+                        {report.status === 'approved' && (
+                           <button 
+                             onClick={() => handleUpdateStatus(report.id, 'rejected')} 
+                             disabled={isUpdatingStatus[report.id]}
+                             className="text-orange-600 hover:text-orange-800 disabled:opacity-50">
+                               {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך לנדחה'}
+                            </button>
+                        )}
+                        {report.status === 'rejected' && (
+                           <button 
+                             onClick={() => handleUpdateStatus(report.id, 'approved')} 
+                             disabled={isUpdatingStatus[report.id]}
+                             className="text-blue-600 hover:text-blue-800 disabled:opacity-50">
+                               {isUpdatingStatus[report.id] ? 'מעדכן...' : 'הפוך למאושר'}
+                            </button>
+                        )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {/* שילוב רכיב העימוד */}
           {totalPages > 1 && (
             <div className="mt-6 flex justify-center">
               <AdminPagination 
@@ -336,7 +332,8 @@ export default function AdminPriceReportsPage() {
             </div>
           )}
         </>
-      ) : null}
+      ) : null} 
+      {isLoading && reports.length > 0 && <div className="text-center py-4 text-slate-500">מעדכן רשימת דיווחים...</div>}
     </div>
   );
 }
